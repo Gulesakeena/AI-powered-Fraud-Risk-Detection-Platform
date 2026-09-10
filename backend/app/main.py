@@ -4,11 +4,19 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
-from app.api import audit, auth, roles, users
+from app.api import audit, auth, dashboard, reports, roles, transactions, users
 from app.core.config import settings
 from app.core.database import Base, SessionLocal, engine
 from app.core.middleware import SecurityHeadersMiddleware
-from app.models import security, token  # noqa: F401
+from app.models import (  # noqa: F401
+    alerts,
+    api_keys,
+    customers,
+    imports,
+    security,
+    token,
+)
+from app.models import transactions as transaction_models  # noqa: F401
 from app.services.bootstrap import create_initial_admin
 from app.services.rbac import seed_roles_and_permissions
 
@@ -83,6 +91,31 @@ app.include_router(
 
 app.include_router(
     audit.router,
+    prefix="/api",
+)
+
+app.include_router(
+    transactions.router,
+    prefix="/api",
+)
+
+app.include_router(
+    transactions.risk_router,
+    prefix="/api",
+)
+
+app.include_router(
+    transactions.risk_lookup_router,
+    prefix="/api",
+)
+
+app.include_router(
+    dashboard.router,
+    prefix="/api",
+)
+
+app.include_router(
+    reports.router,
     prefix="/api",
 )
 
