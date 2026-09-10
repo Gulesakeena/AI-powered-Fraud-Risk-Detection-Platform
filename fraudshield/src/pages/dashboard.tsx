@@ -1,4 +1,4 @@
-﻿import * as React from "react"
+import * as React from "react"
 import { useNavigate } from "react-router-dom"
 import {
   Activity as ActivityIcon,
@@ -32,7 +32,9 @@ import {
 import type { TooltipContentProps } from "recharts"
 import { cn } from "@/lib/utils"
 import { formatCurrency, formatNumber } from "@/lib/utils"
-import { user, transactions, fraudPatterns } from "@/data/mock"
+import { dashboardApi } from "@/lib/api"
+import { mapApiTransaction } from "@/lib/adapters"
+import { user, fraudPatterns } from "@/data/mock"
 import type { Transaction } from "@/data/mock"
 import { MetricCard } from "@/components/ui/metric-card"
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card"
@@ -93,21 +95,11 @@ const businessOptions = [
   { label: "Travel", value: "travel" },
 ]
 
-const distributionData: DistributionDatum[] = [
-  { name: "LOW", color: "#22C55E", percent: 68, count: 16924, value: 1284300 },
-  { name: "MEDIUM", color: "#F59E0B", percent: 27, count: 6720, value: 584600 },
-  { name: "HIGH", color: "#EF4444", percent: 5, count: 1248, value: 182430 },
-]
-
-const trendData: TrendDatum[] = [
-  { label: "Sep 2", total: 3100, highRisk: 142, fraud: 8 },
-  { label: "Sep 3", total: 3550, highRisk: 168, fraud: 11 },
-  { label: "Sep 4", total: 3820, highRisk: 195, fraud: 14 },
-  { label: "Sep 5", total: 3440, highRisk: 152, fraud: 9 },
-  { label: "Sep 6", total: 4195, highRisk: 231, fraud: 18 },
-  { label: "Sep 7", total: 3670, highRisk: 188, fraud: 13 },
-  { label: "Sep 8", total: 3117, highRisk: 172, fraud: 11 },
-]
+const distributionColors: Record<string, string> = {
+  LOW: "#22C55E",
+  MEDIUM: "#F59E0B",
+  HIGH: "#EF4444",
+}
 
 const riskRangeData: RiskRangeDatum[] = [
   { range: "0-20", count: 12840, color: "#22C55E", score: 10 },
@@ -130,8 +122,8 @@ const timeAgoFromNow = (iso: string): string => {
   return `${days}d ago`
 }
 
-const buildFeed = (): FeedItem[] => {
-  const sorted = [...transactions]
+const buildFeed = (source: Transaction[]): FeedItem[] => {
+  const sorted = [...source]
     .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
     .slice(0, 10)
   return sorted.map((t) => ({
@@ -157,12 +149,77 @@ export default function DashboardPage() {
   const [showHighRisk, setShowHighRisk] = React.useState(true)
   const [showFraud, setShowFraud] = React.useState(true)
 
-  const highRiskTxns = React.useMemo(
-    () => transactions.filter((t) => t.riskScore > 60).slice(0, 8),
-    []
+  const [stats, setStats] = React.useState<import("@/lib/api").DashboardStats | null>(null)
+  const [distribution, setDistribution] = React.useState<import("@/lib/api").RiskDistributionBucket[]>([])
+  const [trends, setTrends] = React.useState<import("@/lib/api").RiskTrendPoint[]>([])
+  const [recentTransactions, setRecentTransactions] = React.useState<Transaction[]>([])
+  const [loading, setLoading] = React.useState(true)
+  const [loadError, setLoadError] = React.useState<string | null>(null)
+
+  React.useEffect(() => {
+    let cancelled = false
+
+    async function loadDashboard() {
+      setLoading(true)
+      setLoadError(null)
+      try {
+        const [overview, riskTrends, riskDistribution, recent] = await Promise.all([
+          dashboardApi.getOverview(),
+          dashboardApi.getRiskTrends(activeRange === "30d" ? 30 : activeRange === "24h" ? 1 : 7),
+          dashboardApi.getRiskDistribution(),
+          dashboardApi.getTransactions(50),
+        ])
+
+        if (cancelled) return
+
+        setStats(overview.stats)
+        setTrends(riskTrends)
+        setDistribution(riskDistribution)
+        setRecentTransactions(recent.items.map(mapApiTransaction))
+      } catch (err) {
+        if (!cancelled) {
+          setLoadError(err instanceof Error ? err.message : "Failed to load dashboard data.")
+        }
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    }
+
+    loadDashboard()
+    return () => {
+      cancelled = true
+    }
+  }, [activeRange])
+
+  const distributionData: DistributionDatum[] = React.useMemo(
+    () =>
+      distribution.map((bucket) => ({
+        name: bucket.risk_level as "LOW" | "MEDIUM" | "HIGH",
+        color: distributionColors[bucket.risk_level] ?? "#94A3B8",
+        percent: bucket.percentage,
+        count: bucket.count,
+        value: bucket.total_value,
+      })),
+    [distribution]
   )
 
-  const feed = React.useMemo(buildFeed, [])
+  const trendData: TrendDatum[] = React.useMemo(
+    () =>
+      trends.map((point) => ({
+        label: point.label,
+        total: point.total,
+        highRisk: point.high_risk,
+        fraud: point.confirmed_fraud,
+      })),
+    [trends]
+  )
+
+  const highRiskTxns = React.useMemo(
+    () => recentTransactions.filter((t) => t.riskScore > 60).slice(0, 8),
+    [recentTransactions]
+  )
+
+  const feed = React.useMemo(() => buildFeed(recentTransactions), [recentTransactions])
 
   const distributionToggle: { id: DistributionMetric; label: string }[] = [
     { id: "percentage", label: "%" },
@@ -357,21 +414,28 @@ export default function DashboardPage() {
         </div>
       </div>
 
+      {/* Load state */}
+      {loadError && (
+        <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400 animate-fade-in">
+          Could not load live dashboard data: {loadError}
+        </div>
+      )}
+
       {/* KPI Metric Cards */}
       <div className="grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-6 animate-fade-in">
         <MetricCard
           title="Total Transactions"
-          value="24,892"
-          change={{ value: 12.4, label: "vs previous" }}
-          trend="up"
+          value={loading || !stats ? "—" : formatNumber(stats.total_transactions)}
+          change={{ value: 0, label: "vs previous" }}
+          trend="neutral"
           icon={CreditCard}
           
           onClick={() => navigate("/transactions")}
         />
         <MetricCard
           title="High Risk"
-          value="1,248"
-          change={{ value: 5.01, label: "of total" }}
+          value={loading || !stats ? "—" : formatNumber(stats.high_risk_transactions)}
+          change={{ value: 0, label: "of total" }}
           trend="neutral"
           icon={ShieldAlert}
           
@@ -379,36 +443,36 @@ export default function DashboardPage() {
         />
         <MetricCard
           title="Fraud Alerts"
-          value="327"
-          change={{ value: 8.2, label: "vs previous" }}
-          trend="up"
+          value={loading || !stats ? "—" : formatNumber(stats.fraud_alerts)}
+          change={{ value: 0, label: "vs previous" }}
+          trend="neutral"
           icon={AlertTriangle}
           
           onClick={() => navigate("/alerts")}
         />
         <MetricCard
           title="Confirmed Fraud"
-          value="84"
-          change={{ value: 182430, label: "USD loss" }}
-          trend="down"
+          value={loading || !stats ? "—" : formatNumber(stats.confirmed_fraud)}
+          change={{ value: loading || !stats ? 0 : stats.false_positives, label: "false positives" }}
+          trend="neutral"
           icon={Shield}
           
           onClick={() => navigate("/investigations")}
         />
         <MetricCard
           title="Avg Risk Score"
-          value="42.7"
-          change={{ value: 4.3, label: "vs previous" }}
-          trend="down"
+          value={loading || !stats ? "—" : stats.average_risk_score.toFixed(1)}
+          change={{ value: 0, label: "vs previous" }}
+          trend="neutral"
           icon={ActivityIcon}
           
           onClick={() => navigate("/fraud-patterns")}
         />
         <MetricCard
-          title="False Positive Rate"
-          value="7.8%"
-          change={{ value: 1.2, label: "vs previous" }}
-          trend="down"
+          title="Blocked Transactions"
+          value={loading || !stats ? "—" : formatNumber(stats.blocked_transactions)}
+          change={{ value: 0, label: "vs previous" }}
+          trend="neutral"
           icon={Wallet}
           
           onClick={() => navigate("/reports")}
