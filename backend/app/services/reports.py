@@ -1,219 +1,225 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from datetime import datetime, timedelta
+
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.core.database import get_db
-from app.core.deps import require_permission
-from app.models.security import User
-from app.schemas.transactions import (
-    CustomerSummaryResponse,
-    ReportPeriodRow,
-    ReportRiskStatistics,
-    TransactionResponse,
-)
-from app.services.export import export_to_csv, export_to_excel, export_to_pdf
-from app.services.reports import (
-    get_confirmed_fraud_transactions,
-    get_daily_fraud_activity,
-    get_false_positive_transactions,
-    get_high_risk_customers,
-    get_high_risk_transactions,
-    get_monthly_fraud_activity,
-    get_risk_statistics,
+from app.models.customers import Customer
+from app.models.transactions import (
+    RiskLevel,
+    Transaction,
+    TransactionOutcome,
 )
 
 
-router = APIRouter(
-    prefix="/reports",
-    tags=["Reports"],
-)
+def get_daily_fraud_activity(db: Session, days: int = 30) -> list[dict]:
+    today = datetime.utcnow().date()
+    rows = []
 
+    for offset in range(days - 1, -1, -1):
+        day = today - timedelta(days=offset)
+        day_start = datetime.combine(day, datetime.min.time())
+        day_end = day_start + timedelta(days=1)
 
-TRANSACTION_EXPORT_COLUMNS = [
-    "transaction_ref",
-    "amount",
-    "currency",
-    "merchant",
-    "risk_score",
-    "risk_level",
-    "decision",
-    "status",
-    "outcome",
-    "occurred_at",
-]
-
-CUSTOMER_EXPORT_COLUMNS = [
-    "customer_ref",
-    "name",
-    "email",
-    "risk_score",
-    "risk_level",
-    "total_transactions",
-    "suspicious_transactions",
-    "confirmed_fraud_count",
-    "false_positive_count",
-]
-
-
-@router.get(
-    "/daily-fraud-activity",
-    response_model=list[ReportPeriodRow],
-)
-def daily_fraud_activity(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(require_permission("reports.read")),
-    days: int = Query(default=30, ge=1, le=365),
-):
-    return [
-        ReportPeriodRow(**row)
-        for row in get_daily_fraud_activity(db, days=days)
-    ]
-
-
-@router.get(
-    "/monthly-fraud-activity",
-    response_model=list[ReportPeriodRow],
-)
-def monthly_fraud_activity(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(require_permission("reports.read")),
-    months: int = Query(default=12, ge=1, le=36),
-):
-    return [
-        ReportPeriodRow(**row)
-        for row in get_monthly_fraud_activity(db, months=months)
-    ]
-
-
-@router.get(
-    "/high-risk-transactions",
-    response_model=list[TransactionResponse],
-)
-def high_risk_transactions(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(require_permission("reports.read")),
-    limit: int = Query(default=100, ge=1, le=500),
-):
-    transactions = get_high_risk_transactions(db, limit=limit)
-    return [TransactionResponse.from_model(item) for item in transactions]
-
-
-@router.get(
-    "/high-risk-customers",
-    response_model=list[CustomerSummaryResponse],
-)
-def high_risk_customers(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(require_permission("reports.read")),
-    limit: int = Query(default=100, ge=1, le=500),
-):
-    return get_high_risk_customers(db, limit=limit)
-
-
-@router.get(
-    "/confirmed-fraud",
-    response_model=list[TransactionResponse],
-)
-def confirmed_fraud(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(require_permission("reports.read")),
-    limit: int = Query(default=200, ge=1, le=1000),
-):
-    transactions = get_confirmed_fraud_transactions(db, limit=limit)
-    return [TransactionResponse.from_model(item) for item in transactions]
-
-
-@router.get(
-    "/false-positives",
-    response_model=list[TransactionResponse],
-)
-def false_positives(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(require_permission("reports.read")),
-    limit: int = Query(default=200, ge=1, le=1000),
-):
-    transactions = get_false_positive_transactions(db, limit=limit)
-    return [TransactionResponse.from_model(item) for item in transactions]
-
-
-@router.get(
-    "/risk-statistics",
-    response_model=ReportRiskStatistics,
-)
-def risk_statistics(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(require_permission("reports.read")),
-):
-    return ReportRiskStatistics(**get_risk_statistics(db))
-
-
-@router.get("/export")
-def export_report(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(require_permission("reports.export")),
-    report: str = Query(...),
-    format: str = Query(..., pattern="^(csv|excel|pdf)$"),
-    limit: int = Query(default=500, ge=1, le=2000),
-):
-    if report == "high-risk-transactions":
-        rows = [
-            TransactionResponse.from_model(item).model_dump()
-            for item in get_high_risk_transactions(db, limit=limit)
-        ]
-        columns = TRANSACTION_EXPORT_COLUMNS
-        filename_base = "high_risk_transactions"
-
-    elif report == "confirmed-fraud":
-        rows = [
-            TransactionResponse.from_model(item).model_dump()
-            for item in get_confirmed_fraud_transactions(db, limit=limit)
-        ]
-        columns = TRANSACTION_EXPORT_COLUMNS
-        filename_base = "confirmed_fraud"
-
-    elif report == "false-positives":
-        rows = [
-            TransactionResponse.from_model(item).model_dump()
-            for item in get_false_positive_transactions(db, limit=limit)
-        ]
-        columns = TRANSACTION_EXPORT_COLUMNS
-        filename_base = "false_positives"
-
-    elif report == "high-risk-customers":
-        rows = [
-            CustomerSummaryResponse.model_validate(item).model_dump()
-            for item in get_high_risk_customers(db, limit=limit)
-        ]
-        columns = CUSTOMER_EXPORT_COLUMNS
-        filename_base = "high_risk_customers"
-
-    else:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Unknown report type.",
+        base_query = db.query(Transaction).filter(
+            Transaction.occurred_at >= day_start,
+            Transaction.occurred_at < day_end,
         )
 
-    if format == "csv":
-        content = export_to_csv(rows, columns)
-        media_type = "text/csv"
-        extension = "csv"
-    elif format == "excel":
-        content = export_to_excel(rows, columns, sheet_name=filename_base)
-        media_type = (
-            "application/vnd.openxmlformats-officedocument"
-            ".spreadsheetml.sheet"
+        total = base_query.count()
+
+        high_risk = base_query.filter(
+            Transaction.risk_level == RiskLevel.HIGH
+        ).count()
+
+        confirmed_fraud = base_query.filter(
+            Transaction.outcome == TransactionOutcome.CONFIRMED_FRAUD
+        ).count()
+
+        false_positives = base_query.filter(
+            Transaction.outcome == TransactionOutcome.FALSE_POSITIVE
+        ).count()
+
+        total_value = (
+            db.query(func.sum(Transaction.amount))
+            .filter(
+                Transaction.occurred_at >= day_start,
+                Transaction.occurred_at < day_end,
+            )
+            .scalar()
+            or 0.0
         )
-        extension = "xlsx"
-    else:
-        content = export_to_pdf(rows, columns, title=filename_base)
-        media_type = "application/pdf"
-        extension = "pdf"
 
-    filename = f"{filename_base}.{extension}"
+        rows.append(
+            {
+                "period": day.isoformat(),
+                "total_transactions": total,
+                "high_risk_transactions": high_risk,
+                "confirmed_fraud": confirmed_fraud,
+                "false_positives": false_positives,
+                "total_value": round(float(total_value), 2),
+            }
+        )
 
-    return Response(
-        content=content,
-        media_type=media_type,
-        headers={
-            "Content-Disposition": f'attachment; filename="{filename}"'
-        },
+    return rows
+
+
+def get_monthly_fraud_activity(db: Session, months: int = 12) -> list[dict]:
+    rows = []
+    today = datetime.utcnow().date().replace(day=1)
+
+    for offset in range(months - 1, -1, -1):
+        month_start_year = today.year
+        month_start_month = today.month - offset
+
+        while month_start_month <= 0:
+            month_start_month += 12
+            month_start_year -= 1
+
+        month_start = datetime(month_start_year, month_start_month, 1)
+
+        if month_start_month == 12:
+            month_end = datetime(month_start_year + 1, 1, 1)
+        else:
+            month_end = datetime(month_start_year, month_start_month + 1, 1)
+
+        base_query = db.query(Transaction).filter(
+            Transaction.occurred_at >= month_start,
+            Transaction.occurred_at < month_end,
+        )
+
+        total = base_query.count()
+
+        high_risk = base_query.filter(
+            Transaction.risk_level == RiskLevel.HIGH
+        ).count()
+
+        confirmed_fraud = base_query.filter(
+            Transaction.outcome == TransactionOutcome.CONFIRMED_FRAUD
+        ).count()
+
+        false_positives = base_query.filter(
+            Transaction.outcome == TransactionOutcome.FALSE_POSITIVE
+        ).count()
+
+        total_value = (
+            db.query(func.sum(Transaction.amount))
+            .filter(
+                Transaction.occurred_at >= month_start,
+                Transaction.occurred_at < month_end,
+            )
+            .scalar()
+            or 0.0
+        )
+
+        rows.append(
+            {
+                "period": month_start.strftime("%Y-%m"),
+                "total_transactions": total,
+                "high_risk_transactions": high_risk,
+                "confirmed_fraud": confirmed_fraud,
+                "false_positives": false_positives,
+                "total_value": round(float(total_value), 2),
+            }
+        )
+
+    return rows
+
+
+def get_high_risk_transactions(db: Session, limit: int = 100) -> list[Transaction]:
+    return (
+        db.query(Transaction)
+        .filter(Transaction.risk_level == RiskLevel.HIGH)
+        .order_by(Transaction.risk_score.desc())
+        .limit(limit)
+        .all()
     )
+
+
+def get_high_risk_customers(db: Session, limit: int = 100) -> list[Customer]:
+    return (
+        db.query(Customer)
+        .order_by(Customer.risk_score.desc())
+        .limit(limit)
+        .all()
+    )
+
+
+def get_confirmed_fraud_transactions(db: Session, limit: int = 200) -> list[Transaction]:
+    return (
+        db.query(Transaction)
+        .filter(Transaction.outcome == TransactionOutcome.CONFIRMED_FRAUD)
+        .order_by(Transaction.occurred_at.desc())
+        .limit(limit)
+        .all()
+    )
+
+
+def get_false_positive_transactions(db: Session, limit: int = 200) -> list[Transaction]:
+    return (
+        db.query(Transaction)
+        .filter(Transaction.outcome == TransactionOutcome.FALSE_POSITIVE)
+        .order_by(Transaction.occurred_at.desc())
+        .limit(limit)
+        .all()
+    )
+
+
+def get_risk_statistics(db: Session) -> dict:
+    total_transactions = db.query(Transaction).count()
+
+    total_value = (
+        db.query(func.sum(Transaction.amount)).scalar() or 0.0
+    )
+
+    average_score = (
+        db.query(func.avg(Transaction.risk_score)).scalar() or 0.0
+    )
+
+    high_risk = (
+        db.query(Transaction)
+        .filter(Transaction.risk_level == RiskLevel.HIGH)
+        .count()
+    )
+
+    medium_risk = (
+        db.query(Transaction)
+        .filter(Transaction.risk_level == RiskLevel.MEDIUM)
+        .count()
+    )
+
+    low_risk = (
+        db.query(Transaction)
+        .filter(Transaction.risk_level == RiskLevel.LOW)
+        .count()
+    )
+
+    confirmed_fraud = (
+        db.query(Transaction)
+        .filter(Transaction.outcome == TransactionOutcome.CONFIRMED_FRAUD)
+        .count()
+    )
+
+    false_positive = (
+        db.query(Transaction)
+        .filter(Transaction.outcome == TransactionOutcome.FALSE_POSITIVE)
+        .count()
+    )
+
+    fraud_loss_estimate = (
+        db.query(func.sum(Transaction.amount))
+        .filter(Transaction.outcome == TransactionOutcome.CONFIRMED_FRAUD)
+        .scalar()
+        or 0.0
+    )
+
+    return {
+        "total_transactions": total_transactions,
+        "total_value": round(float(total_value), 2),
+        "average_risk_score": round(float(average_score), 2),
+        "high_risk_count": high_risk,
+        "medium_risk_count": medium_risk,
+        "low_risk_count": low_risk,
+        "confirmed_fraud_count": confirmed_fraud,
+        "false_positive_count": false_positive,
+        "fraud_loss_estimate": round(float(fraud_loss_estimate), 2),
+    }
