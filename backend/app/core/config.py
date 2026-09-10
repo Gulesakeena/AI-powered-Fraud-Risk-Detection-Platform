@@ -23,6 +23,16 @@ class Settings(BaseSettings):
 
     ALLOWED_HOSTS: str = "localhost,127.0.0.1,testserver"
 
+    REDIS_URL: str = "redis://localhost:6379/0"
+
+    CELERY_BROKER_URL: str = "redis://localhost:6379/1"
+    CELERY_RESULT_BACKEND: str = "redis://localhost:6379/2"
+
+    CSV_ASYNC_ROW_THRESHOLD: int = 500
+
+    DEFAULT_PAGE_SIZE: int = 25
+    MAX_PAGE_SIZE: int = 200
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
