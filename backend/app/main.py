@@ -4,7 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
-from app.api import audit, auth, dashboard, reports, roles, transactions, users
+from app.api import audit, auth, dashboard, reports, roles, rules, transactions, users
 from app.core.config import settings
 from app.core.database import Base, SessionLocal, engine
 from app.core.middleware import SecurityHeadersMiddleware
@@ -13,12 +13,15 @@ from app.models import (  # noqa: F401
     api_keys,
     customers,
     imports,
+    risk_explanation,
+    rules as rules_model,
     security,
     token,
 )
 from app.models import transactions as transaction_models  # noqa: F401
 from app.services.bootstrap import create_initial_admin
 from app.services.rbac import seed_roles_and_permissions
+from app.services.rules_engine import get_or_create_default_rules
 
 
 @asynccontextmanager
@@ -30,6 +33,7 @@ async def lifespan(app: FastAPI):
     try:
         seed_roles_and_permissions(db)
         create_initial_admin(db)
+        get_or_create_default_rules(db)
     finally:
         db.close()
 
@@ -106,6 +110,16 @@ app.include_router(
 
 app.include_router(
     transactions.risk_lookup_router,
+    prefix="/api",
+)
+
+app.include_router(
+    rules.rules_router,
+    prefix="/api",
+)
+
+app.include_router(
+    rules.risk_explanation_router,
     prefix="/api",
 )
 
