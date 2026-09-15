@@ -18,6 +18,7 @@ from app.services.customers import (
     get_or_create_customer,
 )
 from app.services.risk_scoring import evaluate_transaction_risk
+from app.services.risk_explanation import generate_risk_explanation
 
 
 SEVERITY_BY_RISK_LEVEL = {
@@ -128,6 +129,19 @@ def create_transaction_with_risk_check(
         )
 
         db.add(alert)
+
+    # Generate comprehensive risk explanation
+    generate_risk_explanation(
+        db,
+        transaction=transaction,
+        ml_score=risk_result.ml_score,
+        rules_score=risk_result.rules_score,
+        behavior_score=risk_result.behavior_score,
+        ml_factors=risk_result.ml_factors,
+        rules_factors=risk_result.rules_factors,
+        behavior_factors=risk_result.behavior_factors,
+        triggered_rule_ids=risk_result.triggered_rule_ids,
+    )
 
     db.commit()
     db.refresh(transaction)
