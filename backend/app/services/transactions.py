@@ -4,6 +4,10 @@ from uuid import uuid4
 
 from sqlalchemy.orm import Session
 
+<<<<<<< HEAD
+=======
+from app.models.alerts import Alert, AlertSeverity
+>>>>>>> 7dc32d20311dacb615026cefea7a42666a4b94e1
 from app.models.transactions import (
     RiskDecision,
     RiskLevel,
@@ -12,14 +16,29 @@ from app.models.transactions import (
     TransactionStatus,
 )
 from app.schemas.transactions import TransactionCreate
+<<<<<<< HEAD
 from app.services.alerts import create_alert_for_transaction
+=======
+>>>>>>> 7dc32d20311dacb615026cefea7a42666a4b94e1
 from app.services.customers import (
     apply_transaction_to_customer,
     get_or_create_customer,
 )
+<<<<<<< HEAD
 from app.services.fraud_detection import run_fraud_detection
 from app.services.risk_explanation import generate_risk_explanation
 from app.services.risk_scoring import evaluate_transaction_risk
+=======
+from app.services.risk_scoring import evaluate_transaction_risk
+from app.services.risk_explanation import generate_risk_explanation
+
+
+SEVERITY_BY_RISK_LEVEL = {
+    RiskLevel.LOW: AlertSeverity.LOW,
+    RiskLevel.MEDIUM: AlertSeverity.MEDIUM,
+    RiskLevel.HIGH: AlertSeverity.HIGH,
+}
+>>>>>>> 7dc32d20311dacb615026cefea7a42666a4b94e1
 
 
 def generate_transaction_ref() -> str:
@@ -113,6 +132,7 @@ def create_transaction_with_risk_check(
         occurred_at=occurred_at,
     )
 
+<<<<<<< HEAD
     fraud_result = run_fraud_detection(db, transaction=transaction, customer=customer)
     create_alert_for_transaction(
         db,
@@ -120,6 +140,18 @@ def create_transaction_with_risk_check(
         customer=customer,
         fraud_result=fraud_result,
     )
+=======
+    if risk_result.decision in (RiskDecision.REVIEW, RiskDecision.BLOCK):
+        alert = Alert(
+            transaction_id=transaction.id,
+            customer_id=customer.id,
+            severity=SEVERITY_BY_RISK_LEVEL[risk_result.level],
+            reason="; ".join(risk_result.factors),
+            risk_score=risk_result.score,
+        )
+
+        db.add(alert)
+>>>>>>> 7dc32d20311dacb615026cefea7a42666a4b94e1
 
     # Generate comprehensive risk explanation
     generate_risk_explanation(
@@ -137,4 +169,8 @@ def create_transaction_with_risk_check(
     db.commit()
     db.refresh(transaction)
 
+<<<<<<< HEAD
     return transaction
+=======
+    return transaction
+>>>>>>> 7dc32d20311dacb615026cefea7a42666a4b94e1

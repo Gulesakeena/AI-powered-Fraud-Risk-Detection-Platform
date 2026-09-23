@@ -5,9 +5,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from app.api import audit, auth, dashboard, reports, roles, rules, transactions, users
+<<<<<<< HEAD
 from app.api import alerts as alerts_api
 from app.api import investigations as investigations_api
 from app.api import customer_risk as customer_risk_api
+=======
+>>>>>>> 7dc32d20311dacb615026cefea7a42666a4b94e1
 from app.core.config import settings
 from app.core.database import Base, SessionLocal, engine
 from app.core.middleware import SecurityHeadersMiddleware
@@ -16,7 +19,10 @@ from app.models import (  # noqa: F401
     api_keys,
     customers,
     imports,
+<<<<<<< HEAD
     investigations,
+=======
+>>>>>>> 7dc32d20311dacb615026cefea7a42666a4b94e1
     risk_explanation,
     rules as rules_model,
     security,
@@ -137,6 +143,7 @@ app.include_router(
     prefix="/api",
 )
 
+<<<<<<< HEAD
 app.include_router(
     alerts_api.router,
     prefix="/api",
@@ -152,9 +159,15 @@ app.include_router(
     prefix="/api",
 )
 
+=======
+>>>>>>> 7dc32d20311dacb615026cefea7a42666a4b94e1
 
 @app.get("/health")
 def health_check():
     return {
         "status": "ok"
+<<<<<<< HEAD
     }
+=======
+    }
+>>>>>>> 7dc32d20311dacb615026cefea7a42666a4b94e1

@@ -1,4 +1,7 @@
+<<<<<<< HEAD
 #schema/transactions.py
+=======
+>>>>>>> 7dc32d20311dacb615026cefea7a42666a4b94e1
 from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field

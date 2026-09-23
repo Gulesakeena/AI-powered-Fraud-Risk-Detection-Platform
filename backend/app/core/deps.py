@@ -1,4 +1,7 @@
+<<<<<<< HEAD
 #core/deps
+=======
+>>>>>>> 7dc32d20311dacb615026cefea7a42666a4b94e1
 from collections.abc import Callable
 
 from fastapi import Depends, HTTPException, status
